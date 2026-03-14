@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+agx.lic
+src/runtime/los_log.csv
+los_log_plot.png
