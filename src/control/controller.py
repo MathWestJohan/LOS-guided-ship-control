@@ -1,4 +1,7 @@
-# control/controller.py
+from dataclasses import dataclass
+from typing import Sequence, Tuple, Optional
+import math
+
 """
 LOS PID controller for 3-DOF vessel waypoint following.
 
@@ -14,11 +17,6 @@ Control law:
     tau_psi = D_r * r_r + Kp_psi * (psi_r - psi_hat) + Kd_psi * (r_r - r_hat) + integral
     tau_y   = -Kd_v * v_hat
 """
-
-from dataclasses import dataclass
-from typing import Sequence, Tuple, Optional
-import math
-
 @dataclass
 class LOSPIDGains:
     """

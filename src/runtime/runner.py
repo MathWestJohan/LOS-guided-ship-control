@@ -2,7 +2,9 @@ import math
 import random
 import csv, os, atexit
 import agx
-from agxPythonModules.utils.environment import simulation, application
+import agxCollide
+import agxOSG
+from agxPythonModules.utils.environment import simulation, application, root
 from agxPythonModules.utils.callbacks import StepEventCallback as Sec
 
 from agx_wrap.world import create_ocean
@@ -12,7 +14,20 @@ from control.reference import LOSReferenceFilter, HeadRefParams, SpeedRefParams
 from control.controller import LOSPIDController, LOSPIDGains
 from control.observer import SimpleObserver, ObsGains
 from control.allocation import TwoThrusterAllocator, Geometry2Thrusters
-from runtime.config import vessel as VCFG, los as LCFG, scene as SCFG, route as RCFG, gnss as NCFG
+from control.route_generator import generate_random_route, analyze_route
+from runtime.config import (vessel as VCFG, los as LCFG, scene as SCFG, 
+                            dock as DCFG, init_area as ICFG, route_gen as RCFG, gnss as NCFG)
+
+_seed_env = os.environ.get("ROUTE_SEED", None)
+ROUTE_SEED = int(_seed_env) if _seed_env is not None else None
+
+waypoints, (start_x, start_y, start_psi) = generate_random_route(
+    area=ICFG, dock=DCFG, params=RCFG, seed=ROUTE_SEED
+)
+print(f"\n── Route generated (seed={ROUTE_SEED}) ──")
+print(f"   Start: ({start_x:.1f}, {start_y:.1f}, {math.degrees(start_psi):.1f}°)")
+print(f"   Dock:  ({DCFG.dock_x:.1f}, {DCFG.dock_y:.1f})")
+analyze_route(waypoints)
 
 # ── CSV logger ──────────────────────────────────────────────────────
 log_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "los_log.csv")
@@ -35,34 +50,34 @@ def build_scene_and_start():
     application().getSceneDecorator().setEnableShadows(False)
     application().setEnableDebugRenderer(True)
     
-    create_ocean(height=SCFG.wave_height)
+    _, _, wwc = create_ocean(height=SCFG.wave_height)
     
-    #for i, (wx, wy) in enumerate(RCFG.waypoints):
-        #sphere = agxCollide.Geometry(agxCollide.Sphere(1.0))
-        #sphere.setPosition(agx.Vec3(wx, wy, 3.0))
-        #sphere.setSensor(True)  # no physics interaction
-        #node = agxOSG.createVisual(sphere, root())
-        #if i == len(RCFG.waypoints) - 1:
-            #agxOSG.setDiffuseColor(node, agx.Vec4f(0, 1, 0, 1))    # green = goal
-        #else:
-            #agxOSG.setDiffuseColor(node, agx.Vec4f(1, 0.5, 0, 1))  # orange = waypoint
-        #simulation().add(sphere)
+    # for i, (wx, wy) in enumerate(RCFG.waypoints):
+    #     sphere = agxCollide.Geometry(agxCollide.Sphere(1.0))
+    #     sphere.setPosition(agx.Vec3(wx, wy, 3.0))
+    #     sphere.setSensor(True)  # no physics interaction
+    #     node = agxOSG.createVisual(sphere, root())
+    #     if i == len(RCFG.waypoints) - 1:
+    #         agxOSG.setDiffuseColor(node, agx.Vec4f(0, 1, 0, 1))    # green = goal
+    #     else:
+    #         agxOSG.setDiffuseColor(node, agx.Vec4f(1, 0.5, 0, 1))  # orange = waypoint
+    #     simulation().add(sphere)
 
-    # Draw path lines between waypoints
-    #for i in range(len(RCFG.waypoints) - 1):
-        #x0, y0 = RCFG.waypoints[i]
-        #x1, y1 = RCFG.waypoints[i + 1]
-        #mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-        #length = math.hypot(x1 - x0, y1 - y0)
-        #angle = math.atan2(y1 - y0, x1 - x0)
+    # # Draw path lines between waypoints
+    # for i in range(len(RCFG.waypoints) - 1):
+    #     x0, y0 = RCFG.waypoints[i]
+    #     x1, y1 = RCFG.waypoints[i + 1]
+    #     mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+    #     length = math.hypot(x1 - x0, y1 - y0)
+    #     angle = math.atan2(y1 - y0, x1 - x0)
 
-        #box = agxCollide.Geometry(agxCollide.Box(length / 2, 0.1, 0.1))
-        #box.setPosition(agx.Vec3(mx, my, 2.5))
-        #box.setRotation(agx.EulerAngles(0, 0, angle))
-        #box.setSensor(True)
-        #node = agxOSG.createVisual(box, root())
-        #agxOSG.setDiffuseColor(node, agx.Vec4f(1, 1, 0, 0.8))
-        #simulation().add(box)
+    #     box = agxCollide.Geometry(agxCollide.Box(length / 2, 0.1, 0.1))
+    #     box.setPosition(agx.Vec3(mx, my, 2.5))
+    #     box.setRotation(agx.EulerAngles(0, 0, angle))
+    #     box.setSensor(True)
+    #     node = agxOSG.createVisual(box, root())
+    #     agxOSG.setDiffuseColor(node, agx.Vec4f(1, 1, 0, 0.8))
+    #     simulation().add(box)
 
     # ── Ship ────────────────────────────────────────────────────────
     ship = Ship(
@@ -78,13 +93,12 @@ def build_scene_and_start():
         thr_star_x=VCFG.thr_star_x,
         thr_star_y=VCFG.thr_star_y,
     )
-    start = RCFG.waypoints[0]
-    ship.setPosition(agx.Vec3(start[0], start[1], 2.0))
+    ship.setPosition(agx.Vec3(start_x, start_y, 2.0))
     simulation().add(ship)
 
     # ── LOS guidance ────────────────────────────────────────────────
     los = LOSGuidance(
-        waypoints=RCFG.waypoints,
+        waypoints=waypoints,
         params=LOSParams(
             Delta_min=LCFG.Delta_min,
             Delta_k=LCFG.Delta_k,
@@ -115,6 +129,7 @@ def build_scene_and_start():
         L_eta=SCFG.obs_L_eta,
         L_nu_xy=SCFG.obs_L_nu_xy,
         L_nu_psi=SCFG.obs_L_nu_psi,
+        filter_alpha=SCFG.obs_filter_alpha,
     ))
     x0, y0, psi0 = ship.get_xy_psi()
     obs.reset(x0, y0, psi0)
@@ -153,6 +168,7 @@ def build_scene_and_start():
 
     last_tau = (0.0, 0.0, 0.0)
     t_sim = 0.0
+    n_legs = len(waypoints) - 1 # Total number of legs in the route
 
     # ── Step callback ───────────────────────────────────────────────
     def los_step(_time: float):
@@ -185,6 +201,13 @@ def build_scene_and_start():
         e_at     = g["e_at"]
         leg      = g["leg"]
         finished = g["finished"]
+        
+        heading_err = abs(_wrap_pi(chi_los - psih))
+        heading_low = math.radians(15)
+        heading_high = math.radians(60)
+        if heading_err > heading_low:
+            blend = min(1.0, (heading_err - heading_low) / (heading_high - heading_low))
+            u_d = u_d * (1.0 - blend) + LCFG.u_approach * blend
 
         # Reference filter
         u_r, psi_r, r_r = ref.step(dt, chi_los, u_d)
@@ -206,7 +229,7 @@ def build_scene_and_start():
         status = "FINISHED" if finished else f"Leg {leg}/{len(RCFG.waypoints)-2}"
         e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
 
-        sd.setText(0, f"── LOS Guidance ── {status}  t={t_sim:.1f}s")
+        sd.setText(0, f" LOS Docking {status}  t={t_sim:.1f}s  seed={ROUTE_SEED}")
         sd.setText(1, f"Position:  x={xh:.1f} m   y={yh:.1f} m   ψ={math.degrees(psih):.1f}°")
         sd.setText(2, f"Velocity:  surge={uh:.2f} m/s   sway={vh:.2f} m/s   yaw rate={math.degrees(rh):.2f} °/s")
         sd.setText(3, f"Path:  cross-track={e_ct:+.1f} m   dist-to-WP={e_at:.1f} m   Δ={Delta_now:.1f} m")
@@ -228,7 +251,7 @@ def build_scene_and_start():
         ])
 
         if int(t_sim / dt) % 200 == 0:
-            print(f"[{t_sim:6.1f}s] leg={leg} e_ct={e_ct:+.2f} u_r={u_r:.3f} chi={math.degrees(chi_los):+.1f}°")
+            print(f"[{t_sim:6.1f}s] leg={leg}/{n_legs-1} e_ct={e_ct:+.2f} u_r={u_r:.3f} chi={math.degrees(chi_los):+.1f}°")
 
     Sec.preCallback(lambda t: los_step(t))
 
@@ -242,8 +265,8 @@ def build_scene_and_start():
 
     # ── Camera ──────────────────────────────────────────────────────
     cam = application().getCameraData()
-    cam.eye    = agx.Vec3(start[0] - 30.0, start[1] - 80.0, 45.0)
-    cam.center = agx.Vec3(start[0], start[1], 5.0)
+    cam.eye    = agx.Vec3(start_x - 30.0, start_y - 80.0, 45.0)
+    cam.center = agx.Vec3(start_x, start_y, 5.0)
     cam.up     = agx.Vec3(0.0, 0.0, 1.0)
     cam.nearClippingPlane = 0.1
     cam.farClippingPlane  = 5000.0

@@ -1,3 +1,7 @@
+import math
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
 """ 
 Classic Line-Of-Sight (LOS) guidance for waypoint following.
 
@@ -9,11 +13,6 @@ where:
     e_ct = signed cross-track error (positive = port side of path)
     Delta = look-ahead distance (tunable)
 """
-import math
-from dataclasses import dataclass, field
-from typing import List, Tuple
-
-
 @dataclass
 class LOSParams:
     Delta_min: float = 20.0       # Minimum look-ahead distance (m)
@@ -77,6 +76,16 @@ class LOSGuidance:
     phi_next = math.atan2(y2 - y1, x2 - x1)
     return abs(self._wrap(phi_next - phi_curr))
   
+  def _distance_to_final_leg(self, x: float, y: float) -> float:
+    """Distance from current position to the final waypoint,
+    measured as distance to next waypoint plus sum of remaining leg lengths."""
+    d = self._dist_to_next(x, y)
+    for i in range(self.leg + 1, len(self.wps) - 1):
+      x0, y0 = self.wps[i]
+      x1, y1 = self.wps[i + 1]
+      d += math.hypot(x1 - x0, y1 - y0)
+    return d
+  
   def step(self, x: float, y: float, u: float = 0.0) -> dict:
     """
     Compute LOS guidance outputs.
@@ -122,22 +131,13 @@ class LOSGuidance:
     chi_los = self._wrap(phi_p - math.atan2(e_ct, Delta))
     
     rem = self._dist_to_next(x, y)
-    if last_leg:
-      if rem < self.p.approach_dist:
-        frac = rem / self.p.approach_dist
-        u_d = self.p.u_approach + frac * (self.p.u_desired - self.p.u_approach)
-      else:
-        u_d = self.p.u_desired
+    dist_to_end = self._distance_to_final_leg(x, y)
+    
+    if dist_to_end < self.p.approach_dist:
+      frac = dist_to_end / self.p.approach_dist
+      u_d = self.p.u_approach + frac * (self.p.u_desired - self.p.u_approach)
     else:
-      turn = self._turn_angle_at_next()
-      turn_factor = min(turn / (math.pi / 2), 1.0)
-      u_turn = self.p.u_desired * (1.0 - turn_factor) + self.p.u_approach * turn_factor
-      eff_approach = self.p.approach_dist * (1.0 + turn_factor)
-      if rem < eff_approach:
-        frac = rem / eff_approach
-        u_d = u_turn + frac * (self.p.u_desired - u_turn)
-      else:
-        u_d = self.p.u_desired
+      u_d = self.p.u_desired
       
     # Cross track speed governor, limit speed when far off the path
     ct_limit = self.p.Delta_min

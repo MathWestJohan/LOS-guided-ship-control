@@ -1,4 +1,6 @@
-# control/reference.py
+import math
+from dataclasses import dataclass
+
 """
 2nd-order reference filters for LOS guidance.
 
@@ -6,8 +8,6 @@ Smooths LOS guidance commands into controller references:
 - Heading channel: chi_los -> (psi_r, r_r) via critically-damped 2nd-order dynamics
 - Speed channel: u_d -> u_r via critically-damped 2nd-order dynamics with saturation
 """
-import math
-from dataclasses import dataclass
 
 def sat(val, vmin, vmax):
     return max(vmin, min(vmax, val))
