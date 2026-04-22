@@ -44,8 +44,8 @@ class InitialArea:
   y_min: float = -20.0
   x_max: float = 100.0
   y_max: float = 100.0
-  psi_min: float = -0.5
-  psi_max: float = 0.5
+  psi_min: float = -1.5
+  psi_max: float = 1.5
 
 @dataclass
 class RouteGeneratorConfig:
