@@ -29,18 +29,40 @@ print(f"   Start: ({start_x:.1f}, {start_y:.1f}, {math.degrees(start_psi):.1f}°
 print(f"   Dock:  ({DCFG.dock_x:.1f}, {DCFG.dock_y:.1f})")
 analyze_route(waypoints)
 
-# ── CSV logger ──────────────────────────────────────────────────────
+# CSV logger
 log_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "los_log.csv")
-_log_file = open(log_path, "w", newline="")
-_log_writer = csv.writer(_log_file)
-_log_writer.writerow([
+_header = [
+    "run_id", "seed",
     "t", "x", "y", "psi", "u", "v", "r",
     "chi_los", "psi_r", "u_r",
     "e_ct", "e_psi",
     "tau_x", "tau_y", "tau_psi",
     "Fx1", "Fy1", "Fx2", "Fy2",
     "leg", "finished"
-])
+]
+
+# Determine run_id by counting existing runs
+_file_exists = os.path.isfile(log_path) and os.path.getsize(log_path) > 0
+if _file_exists:
+    with open(log_path, "r") as f:
+        reader = csv.reader(f)
+        header_row = next(reader, None)
+        if header_row and "run_id" in header_row:
+            rid_col = header_row.index("run_id")
+            max_rid = max((int(row[rid_col]) for row in reader if row), default=0)
+            RUN_ID = max_rid + 1
+        else:
+            _file_exists = False
+            RUN_ID = 0
+else:
+    RUN_ID = 0
+
+_log_file = open(log_path, "a" if _file_exists else "w", newline="")
+_log_writer = csv.writer(_log_file)
+if not _file_exists:
+    _log_writer.writerow(_header)
+
+print(f"   Logging as run_id={RUN_ID} → {os.path.abspath(log_path)}")
 
 def _wrap_pi(a: float) -> float:
     return math.atan2(math.sin(a), math.cos(a))
@@ -94,9 +116,12 @@ def build_scene_and_start():
         thr_star_y=VCFG.thr_star_y,
     )
     ship.setPosition(agx.Vec3(start_x, start_y, 2.0))
+    ship.setRotation(agx.EulerAngles(0, 0, start_psi))
     simulation().add(ship)
+    print(f"Ship initial position: x={start_x:.1f} m, y={start_y:.1f} m, psi={math.degrees(start_psi):.1f} °")
+    print(f"   Spawned heading: {math.degrees(ship.get_xy_psi()[2]):.1f}° (expected {math.degrees(start_psi):.1f}°)")
 
-    # ── LOS guidance ────────────────────────────────────────────────
+    # LOS guidance
     los = LOSGuidance(
         waypoints=waypoints,
         params=LOSParams(
@@ -109,7 +134,7 @@ def build_scene_and_start():
         ),
     )
 
-    # ── Reference filter ────────────────────────────────────────────
+    # Reference filter
     ref = LOSReferenceFilter(
         head_params=HeadRefParams(
             omega=SCFG.ref_head_wn,
@@ -124,7 +149,7 @@ def build_scene_and_start():
     )
     ref.reset(psi_now=ship.get_xy_psi()[2])
 
-    # ── Observer ────────────────────────────────────────────────────
+    # Observer
     obs = SimpleObserver(ObsGains(
         L_eta=SCFG.obs_L_eta,
         L_nu_xy=SCFG.obs_L_nu_xy,
@@ -134,7 +159,7 @@ def build_scene_and_start():
     x0, y0, psi0 = ship.get_xy_psi()
     obs.reset(x0, y0, psi0)
 
-    # ── Allocator ───────────────────────────────────────────────────
+    # Allocator
     lx1 = float(ship.thruster_port_local.x())
     ly1 = float(ship.thruster_port_local.y())
     lx2 = float(ship.thruster_star_local.x())
@@ -145,7 +170,7 @@ def build_scene_and_start():
         Tmax=VCFG.Tmax_thruster,
     )
 
-    # ── Controller ──────────────────────────────────────────────────
+    # Controller
     M = [VCFG.mass, VCFG.mass, VCFG.Iz]
     D = [VCFG.Xu,   VCFG.Yv,   VCFG.Nr]
     ctl = LOSPIDController(
@@ -160,7 +185,7 @@ def build_scene_and_start():
         ),
     )
 
-    # ── HUD ─────────────────────────────────────────────────────────
+    # HUD
     sd = application().getSceneDecorator()
     sd.setText(1, "LOS guidance active")
     sd.setText(2, "Thrusters [Fx1,Fy1,Fx2,Fy2] (kN)")
@@ -170,13 +195,13 @@ def build_scene_and_start():
     t_sim = 0.0
     n_legs = len(waypoints) - 1 # Total number of legs in the route
 
-    # ── Step callback ───────────────────────────────────────────────
+    # Step callback
     def los_step(_time: float):
         nonlocal last_tau, t_sim
         dt = simulation().getTimeStep()
         t_sim += dt
 
-        # Raw measurement (+ optional noise)
+        # Raw measurement + optional noise
         x, y, psi = ship.get_xy_psi()
         if getattr(NCFG, "disable_noise", False):
             x_m, y_m, psi_m = x, y, psi
@@ -226,7 +251,7 @@ def build_scene_and_start():
 
         # HUD
         Delta_now = LCFG.Delta_min + LCFG.Delta_k * abs(uh)
-        status = "FINISHED" if finished else f"Leg {leg}/{len(RCFG.waypoints)-2}"
+        status = "FINISHED" if finished else f"Leg {leg}/{n_legs-1}"
         e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
 
         sd.setText(0, f" LOS Docking {status}  t={t_sim:.1f}s  seed={ROUTE_SEED}")
@@ -241,6 +266,7 @@ def build_scene_and_start():
         
         # Log
         _log_writer.writerow([
+            RUN_ID, ROUTE_SEED if ROUTE_SEED is not None else "",
             f"{t_sim:.4f}", f"{xh:.4f}", f"{yh:.4f}", f"{psih:.4f}",
             f"{uh:.4f}", f"{vh:.4f}", f"{rh:.4f}",
             f"{chi_los:.4f}", f"{psi_r:.4f}", f"{u_r:.4f}",
@@ -255,7 +281,7 @@ def build_scene_and_start():
 
     Sec.preCallback(lambda t: los_step(t))
 
-    # ── Cleanup ─────────────────────────────────────────────────────
+    # Cleanup
     def close_log():
         try:
             _log_file.close()
@@ -263,7 +289,7 @@ def build_scene_and_start():
             pass
     atexit.register(close_log)
 
-    # ── Camera ──────────────────────────────────────────────────────
+    # Camera
     cam = application().getCameraData()
     cam.eye    = agx.Vec3(start_x - 30.0, start_y - 80.0, 45.0)
     cam.center = agx.Vec3(start_x, start_y, 5.0)
