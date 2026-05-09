@@ -5,3 +5,6 @@ logs/
 agx.lic
 src/runtime/los_log.csv
 los_log_plot.png
+.env
+settings.json
+launch.json

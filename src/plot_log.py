@@ -14,11 +14,14 @@ def _leg_transitions(df):
     changes = df.leg.diff().fillna(0).abs() > 0
     return df.index[changes].tolist(), df.t.iloc[df.index[changes]].tolist()
 
-def plot_los_log(csv_path="data/los_log.csv", out_path="data/los_log_plot.png"):
+def plot_los_log(csv_path="data/training_data.csv", out_path="data/los_log_plot.png"):
     df = pd.read_csv(csv_path)
 
     if "run_id" not in df.columns:
-        df["run_id"] = 0
+        if "episodes" in df.columns:
+            df["run_id"] = df.episodes
+        else:
+            df["run_id"] = 0
     run_ids = sorted(df.run_id.unique())
     n_runs = len(run_ids)
     cmap = get_cmap("tab10") if n_runs <= 10 else get_cmap("turbo", n_runs)
