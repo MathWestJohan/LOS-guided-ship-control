@@ -15,11 +15,13 @@ from control.controller import LOSPIDController, LOSPIDGains
 from control.observer import SimpleObserver, ObsGains
 from control.allocation import TwoThrusterAllocator, Geometry2Thrusters
 from control.route_generator import generate_random_route, analyze_route
+from model.model_controller import MLPController
 from runtime.config import (vessel as VCFG, los as LCFG, scene as SCFG, 
                             dock as DCFG, init_area as ICFG, route_gen as RCFG, gnss as NCFG)
 
 _seed_env = os.environ.get("ROUTE_SEED", None)
 ROUTE_SEED = int(_seed_env) if _seed_env is not None else None
+controller = MLPController()
 
 waypoints, (start_x, start_y, start_psi) = generate_random_route(
     area=ICFG, dock=DCFG, params=RCFG, seed=ROUTE_SEED
@@ -236,13 +238,23 @@ def build_scene_and_start():
 
         # Reference filter
         u_r, psi_r, r_r = ref.step(dt, chi_los, u_d)
-
+        
         # Controller
         tau_x, tau_y, tau_psi = ctl.step(
             dt,
             u_r=u_r, psi_r=psi_r, r_r=r_r,
             u_hat=uh, v_hat=vh, r_hat=rh, psi_hat=psih,
         )
+
+        # MLP Controller
+        # e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
+        # dist_dock = math.hypot(DCFG.dock_x - xh, DCFG.dock_y - yh)
+        # tau_x, tau_y, tau_psi = controller.predict(
+        #     x=xh, y=yh, psi=psih,
+        #     u=uh, v=vh, r=rh,
+        #     u_r=u_r, e_ct=e_ct, e_psi=e_psi_deg,
+        #     dist_dock=dist_dock,
+        # )
 
         # Allocate & apply
         Fx1, Fy1, Fx2, Fy2 = alloc.allocate(tau_x, tau_y, tau_psi)
@@ -252,7 +264,6 @@ def build_scene_and_start():
         # HUD
         Delta_now = LCFG.Delta_min + LCFG.Delta_k * abs(uh)
         status = "FINISHED" if finished else f"Leg {leg}/{n_legs-1}"
-        e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
 
         sd.setText(0, f" LOS Docking {status}  t={t_sim:.1f}s  seed={ROUTE_SEED}")
         sd.setText(1, f"Position:  x={xh:.1f} m   y={yh:.1f} m   ψ={math.degrees(psih):.1f}°")
