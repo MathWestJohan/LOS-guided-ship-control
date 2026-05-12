@@ -26,7 +26,7 @@ import pickle
 
 CONFIG = {
     # Data
-    "data_dir": "data/episodes",        # folder with CSV episode files
+    "data_dir": "data/training_data",        # folder with CSV episode files
     "output_dir": "models",
 
     "speed_hidden": [64, 32],
