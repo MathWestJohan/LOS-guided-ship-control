@@ -234,6 +234,6 @@ if __name__ == "__main__":
   for seed in [42, 123, 7, 999, 2024]:
         print(f"\n{'='*60}")
         print(f"Seed {seed}:")
-        route, (sx, sy, spsi) = generate_random_route(area, dock, params, seed)
+        route, (sx, sy, spsi) = generate_random_route(dock, params, area, seed)
         print(f"  Start: ({sx:.1f}, {sy:.1f}, {math.degrees(spsi):.1f}°)")
         analyze_route(route)
