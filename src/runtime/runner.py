@@ -22,6 +22,7 @@ from runtime.config import (vessel as VCFG, los as LCFG, scene as SCFG,
 _seed_env = os.environ.get("ROUTE_SEED", None)
 ROUTE_SEED = int(_seed_env) if _seed_env is not None else None
 controller = MLPController()
+USE_MLP = True
 
 waypoints, (start_x, start_y, start_psi) = generate_random_route(
     area=ICFG, dock=DCFG, params=RCFG, seed=ROUTE_SEED
@@ -130,6 +131,7 @@ def build_scene_and_start():
             Delta_min=LCFG.Delta_min,
             Delta_k=LCFG.Delta_k,
             switch_radius=LCFG.switch_radius,
+            final_dock_radius=LCFG.final_dock_radius,
             u_desired=LCFG.u_desired,
             u_approach=LCFG.u_approach,
             approach_dist=LCFG.approach_dist,
@@ -239,31 +241,31 @@ def build_scene_and_start():
         # Reference filter
         u_r, psi_r, r_r = ref.step(dt, chi_los, u_d)
         
-        # Controller
-        tau_x, tau_y, tau_psi = ctl.step(
-            dt,
-            u_r=u_r, psi_r=psi_r, r_r=r_r,
-            u_hat=uh, v_hat=vh, r_hat=rh, psi_hat=psih,
-        )
+        # Old Controller logic
+        # tau_x, tau_y, tau_psi = ctl.step(
+        #     dt,
+        #     u_r=u_r, psi_r=psi_r, r_r=r_r,
+        #     u_hat=uh, v_hat=vh, r_hat=rh, psi_hat=psih,
+        # )
 
         # MLP Controller
-        # dx = DCFG.dock_x - xh
-        # dy = DCFG.dock_y - yh
         e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
-        # dist_dock = math.hypot(dx, dy)
-
-        # tau_x, tau_y, tau_psi = controller.predict(
-        #     dx=dx,
-        #     dy=dy,
-        #     psi=psih,
-        #     u=uh,
-        #     v=vh,
-        #     r=rh,
-        #     u_r=u_r,
-        #     e_ct=e_ct,
-        #     e_psi=e_psi_deg,
-        #     dist_dock=dist_dock,
-        # )
+        if USE_MLP:
+            dx = DCFG.dock_x - xh
+            dy = DCFG.dock_y - yh
+            dist_dock = math.hypot(dx, dy)
+            tau_x, tau_y, tau_psi = controller.predict(
+                dx=dx, dy=dy, psi=psih,
+                u=uh, v=vh, r=rh,
+                u_r=u_r, e_ct=e_ct, e_psi=e_psi_deg,
+                dist_dock=dist_dock,
+            )
+        else:
+            tau_x, tau_y, tau_psi = ctl.step(
+                dt,
+                u_r=u_r, psi_r=psi_r, r_r=r_r,
+                u_hat=uh, v_hat=vh, r_hat=rh, psi_hat=psih,
+            )
 
         # Allocate & apply
         Fx1, Fy1, Fx2, Fy2 = alloc.allocate(tau_x, tau_y, tau_psi)
