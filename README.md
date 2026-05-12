@@ -49,19 +49,19 @@ assets/                    # Ship mesh (Gunnerus.obj)
 
 ## Running
 
-### Visual simulation (single run with viewer):
+### Visual simulation (single run with viewer)
 
 ```bat
 "%LOCALAPPDATA%\Algoryx\AGX-2.40.1.5\python-x64\python.exe" src/main.py
 ```
 
-### Headless data collection (many episodes, no viewer):
+### Headless data collection (many episodes, no viewer)
 
 ```bat
 "%LOCALAPPDATA%\Algoryx\AGX-2.40.1.5\python-x64\python.exe" src/data_collection.py --episodes 50 --seed 0 --output data/training_data.csv
 ```
 
-### Train the MLP controllers:
+### Train the MLP controllers
 
 ```bat
 python src/model/train_mlp.py
