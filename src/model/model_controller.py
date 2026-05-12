@@ -65,7 +65,7 @@ class MLPController:
     )
     self.speed_model.eval()
     
-    self.steer_model = DockingMLP(6, list(steer_hidden), 1)
+    self.steer_model = DockingMLP(8, list(steer_hidden), 2)
     self.steer_model.load_state_dict(
       torch.load(os.path.join(model_dir, "mlp_steer.pt"),
                  map_location=self.device, weights_only=True)
@@ -88,10 +88,10 @@ class MLPController:
     # steering network
     x_steer = np.array([[np.sin(psi), np.cos(psi), e_ct, e_psi, v, r, x, y]])
     x_steer_scaled = self.scaler_rx.transform(x_steer)
-    x_steer_tensor = torch.tensor(x_steer_scaled, dtype=torch.float32)
-    tau_yr_scaled = self.steer_model(x_steer_tensor).numpy()
-    tau_yr = self.scaler_ry.inverse_transform(tau_yr_scaled)[0, 0]
-    tau_y, tau_n = tau_yr[0], tau_yr[0]
+    x_steer_tensor = torch.tensor(x_steer_scaled, dtype=torch.float32, device=self.device)
+    tau_yn_scaled = self.steer_model(x_steer_tensor).cpu().numpy()
+    tau_yn = self.scaler_ry.inverse_transform(tau_yn_scaled)[0]
+    tau_y, tau_n = tau_yn[0], tau_yn[1]
     
     return float(tau_x), float(tau_y), float(tau_n)
   
