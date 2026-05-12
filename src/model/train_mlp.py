@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import json
@@ -26,7 +26,7 @@ import pickle
 
 CONFIG = {
     # Data
-    "data_dir": "data/training_data",        # folder with CSV episode files
+    "data_dir": "data/training_data.csv",        # folder with CSV episode files
     "output_dir": "models",
 
     "speed_hidden": [64, 32],
@@ -76,7 +76,7 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     # Targets
     feat["tau_x"]    = df["tau_x"]      # surge force (speed net target)
     feat["tau_y"]    = df["tau_y"]      # sway force (steer net target)
-    feat["tau_n"]    = df["tau_n"]      # yaw moment (steer net target)
+    feat["tau_n"]    = df["tau_psi"]      # yaw moment (steer net target)
 
     return feat.dropna()
 
@@ -289,25 +289,63 @@ def plot_predictions(preds, targets, target_names, save_path, n_points=500):
     plt.close()
     print(f"  Prediction plots saved to {save_path}")
 
-def load_all_episodes(data_dir: str) -> pd.DataFrame:
-    """Load and concatenate all CSV episode files."""
+def load_all_episodes(data_path: str) -> pd.DataFrame:
+    """Load and concatenate CSV data from a single file or a directory."""
 
-    csv_files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
+    if os.path.isfile(data_path):
+        csv_files = [data_path]
+    else:
+        csv_files = sorted(glob.glob(os.path.join(data_path, "*.csv")))
+
     if not csv_files:
         raise FileNotFoundError(
-            f"No CSV files found in {data_dir}/\n"
-            f"Run your data collection first to generate episodes."
+            f"No CSV files found at {data_path}\n"
+            f"Run your data collection first to generate CSV data."
         )
 
     dfs = []
+    multi_file = len(csv_files) > 1
+
     for f in csv_files:
         df = pd.read_csv(f)
-        df["episode"] = os.path.basename(f)
+        file_tag = os.path.basename(f)
+
+        if "episode" in df.columns:
+            if multi_file:
+                df["episode"] = df["episode"].astype(str).map(lambda ep: f"{file_tag}::{ep}")
+            else:
+                df["episode"] = df["episode"].astype(str)
+        else:
+            df["episode"] = file_tag
+
         dfs.append(df)
 
     combined = pd.concat(dfs, ignore_index=True)
-    print(f"Loaded {len(csv_files)} episodes, {len(combined)} total timesteps")
+    print(f"Loaded {len(csv_files)} CSV file(s), {len(combined)} total timesteps")
     return combined
+
+def keep_successful_episodes(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep all rows from episodes whose final row has finished == 1."""
+    if "episode" not in df.columns:
+        raise ValueError("Expected an 'episode' column for episode-level filtering.")
+    if "finished" not in df.columns:
+        raise ValueError("Expected a 'finished' column for success filtering.")
+
+    episode_finished = (
+        df.groupby("episode", sort=False)["finished"]
+        .last()
+        .astype(int)
+    )
+
+    successful_episodes = episode_finished[episode_finished == 1].index
+    filtered = df[df["episode"].isin(successful_episodes)].reset_index(drop=True)
+
+    print(
+        f"Kept {len(successful_episodes)}/{len(episode_finished)} successful episodes "
+        f"({len(filtered)} rows)"
+    )
+    return filtered
+
 
 def subsample_data(df: pd.DataFrame, step: int) -> pd.DataFrame:
     """Subsample by taking every step-th row per episode."""
@@ -319,34 +357,80 @@ def subsample_data(df: pd.DataFrame, step: int) -> pd.DataFrame:
         ).reset_index(drop=True)
     return df.iloc[::step].reset_index(drop=True)
 
-def prepare_data(features_df, input_cols, target_cols, config):
-    """Scale data and split into train/val/test DataLoaders."""
 
-    X = features_df[input_cols].values
-    Y = features_df[target_cols].values
+def split_by_episode(df: pd.DataFrame, config: dict):
+    """Split raw rows by episode so no rollout leaks across train/val/test."""
+    if "episode" not in df.columns:
+        raise ValueError("Expected an 'episode' column for episode-based splitting.")
 
-    # Fit scalers on everything first, then split
-    scaler_x = StandardScaler().fit(X)
-    scaler_y = StandardScaler().fit(Y)
-    X_scaled = scaler_x.transform(X)
-    Y_scaled = scaler_y.transform(Y)
+    episode_ids = df["episode"].drop_duplicates().to_numpy()
+    n_episodes = len(episode_ids)
 
-    dataset = DockingDataset(X_scaled, Y_scaled)
+    if n_episodes < 3:
+        raise ValueError(
+            f"Need at least 3 successful episodes for train/val/test split, got {n_episodes}."
+        )
 
-    # Split
-    n = len(dataset)
-    n_test = int(n * config["test_split"])
-    n_val = int(n * config["val_split"])
-    n_train = n - n_val - n_test
+    rng = np.random.default_rng(config["seed"])
+    rng.shuffle(episode_ids)
 
-    torch.manual_seed(config["seed"])
-    train_ds, val_ds, test_ds = random_split(dataset, [n_train, n_val, n_test])
+    n_test = max(1, int(round(n_episodes * config["test_split"])))
+    n_val = max(1, int(round(n_episodes * config["val_split"])))
+
+    while n_test + n_val >= n_episodes:
+        if n_val > 1:
+            n_val -= 1
+        elif n_test > 1:
+            n_test -= 1
+        else:
+            raise ValueError("Not enough episodes to create non-empty splits.")
+
+    test_eps = episode_ids[:n_test]
+    val_eps = episode_ids[n_test:n_test + n_val]
+    train_eps = episode_ids[n_test + n_val:]
+
+    train_df = df[df["episode"].isin(train_eps)].reset_index(drop=True)
+    val_df = df[df["episode"].isin(val_eps)].reset_index(drop=True)
+    test_df = df[df["episode"].isin(test_eps)].reset_index(drop=True)
+
+    print(
+        f"Episode split: {len(train_eps)} train / {len(val_eps)} val / {len(test_eps)} test"
+    )
+    print(
+        f"Row split: {len(train_df)} train / {len(val_df)} val / {len(test_df)} test"
+    )
+
+    return train_df, val_df, test_df
+
+def prepare_data(train_df, val_df, test_df, input_cols, target_cols, config):
+    """Scale data using train only, then build DataLoaders."""
+
+    X_train = train_df[input_cols].values
+    Y_train = train_df[target_cols].values
+    X_val = val_df[input_cols].values
+    Y_val = val_df[target_cols].values
+    X_test = test_df[input_cols].values
+    Y_test = test_df[target_cols].values
+
+    scaler_x = StandardScaler().fit(X_train)
+    scaler_y = StandardScaler().fit(Y_train)
+
+    X_train_scaled = scaler_x.transform(X_train)
+    Y_train_scaled = scaler_y.transform(Y_train)
+    X_val_scaled = scaler_x.transform(X_val)
+    Y_val_scaled = scaler_y.transform(Y_val)
+    X_test_scaled = scaler_x.transform(X_test)
+    Y_test_scaled = scaler_y.transform(Y_test)
+
+    train_ds = DockingDataset(X_train_scaled, Y_train_scaled)
+    val_ds = DockingDataset(X_val_scaled, Y_val_scaled)
+    test_ds = DockingDataset(X_test_scaled, Y_test_scaled)
 
     train_loader = DataLoader(train_ds, batch_size=config["batch_size"], shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=config["batch_size"])
-    test_loader  = DataLoader(test_ds,  batch_size=config["batch_size"])
+    val_loader = DataLoader(val_ds, batch_size=config["batch_size"])
+    test_loader = DataLoader(test_ds, batch_size=config["batch_size"])
 
-    print(f"  Split: {n_train} train / {n_val} val / {n_test} test")
+    print(f"  Split: {len(train_ds)} train / {len(val_ds)} val / {len(test_ds)} test")
 
     return train_loader, val_loader, test_loader, scaler_x, scaler_y
 
@@ -362,18 +446,28 @@ def main():
     print("LOADING DATA")
     print("=" * 60)
     raw_df = load_all_episodes(CONFIG["data_dir"])
+    raw_df = keep_successful_episodes(raw_df)
     raw_df = subsample_data(raw_df, CONFIG["subsample_step"])
     print(f"After subsampling (step={CONFIG['subsample_step']}): {len(raw_df)} samples")
-    features_df = compute_features(raw_df)
-    print(f"After feature engineering: {len(features_df)} samples")
-    print(f"Features: {list(features_df.columns)}\n")
+
+    train_raw, val_raw, test_raw = split_by_episode(raw_df, CONFIG)
+
+    train_features = compute_features(train_raw)
+    val_features = compute_features(val_raw)
+    test_features = compute_features(test_raw)
+
+    print(
+        f"After feature engineering: "
+        f"{len(train_features)} train / {len(val_features)} val / {len(test_features)} test samples"
+    )
+    print(f"Features: {list(train_features.columns)}\n")
 
     # Speed network
     print("=" * 60)
     print("SPEED NETWORK  [dx, dy, u, u_r, e_ct, dist_dock] → τ_x")
     print("=" * 60)
     train_s, val_s, test_s, scaler_sx, scaler_sy = prepare_data(
-        features_df, SPEED_INPUTS, SPEED_TARGETS, CONFIG
+        train_features, val_features, test_features, SPEED_INPUTS, SPEED_TARGETS, CONFIG
     )
 
     speed_model = DockingMLP(
@@ -395,7 +489,7 @@ def main():
     print("STEERING NETWORK  [sin(ψ), cos(ψ), e_ct, e_ψ, v, r, dx, dy] → τ_y, τ_ψ")
     print("=" * 60)
     train_r, val_r, test_r, scaler_rx, scaler_ry = prepare_data(
-        features_df, STEER_INPUTS, STEER_TARGETS, CONFIG
+        train_features, val_features, test_features, STEER_INPUTS, STEER_TARGETS, CONFIG
     )
 
     steer_model = DockingMLP(
