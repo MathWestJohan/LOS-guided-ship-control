@@ -195,6 +195,7 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
     )
     
     body.setPosition(agx.Vec3(sx, sy, 2.0))
+    body.setRotation(agx.Quat(agx.EulerAngles(0, 0, psi)) * mesh_quat)
     body.setVelocity(agx.Vec3(0, 0, 0))
     body.setAngularVelocity(agx.Vec3(0, 0, 0))
     
