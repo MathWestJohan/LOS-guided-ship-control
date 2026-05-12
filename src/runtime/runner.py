@@ -247,12 +247,21 @@ def build_scene_and_start():
         )
 
         # MLP Controller
-        # e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
-        # dist_dock = math.hypot(DCFG.dock_x - xh, DCFG.dock_y - yh)
+        # dx = DCFG.dock_x - xh
+        # dy = DCFG.dock_y - yh
+        e_psi_deg = math.degrees(_wrap_pi(psi_r - psih))
+        # dist_dock = math.hypot(dx, dy)
+
         # tau_x, tau_y, tau_psi = controller.predict(
-        #     x=xh, y=yh, psi=psih,
-        #     u=uh, v=vh, r=rh,
-        #     u_r=u_r, e_ct=e_ct, e_psi=e_psi_deg,
+        #     dx=dx,
+        #     dy=dy,
+        #     psi=psih,
+        #     u=uh,
+        #     v=vh,
+        #     r=rh,
+        #     u_r=u_r,
+        #     e_ct=e_ct,
+        #     e_psi=e_psi_deg,
         #     dist_dock=dist_dock,
         # )
 
