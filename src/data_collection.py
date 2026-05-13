@@ -132,8 +132,8 @@ def wrap_pi(a: float) -> float:
   return math.atan2(math.sin(a), math.cos(a))
 
 # Data collection loop
-def collect_data(n_episodes: int = 50, base_seed: int = 0,
-                 max_ep_time: float = 300.0, dt: float = 1.0/60.0,
+def collect_data(n_episodes: int = 20, base_seed: int = 0,
+                 max_ep_time: float = 180.0, dt: float = 1.0/60.0,
                  output_path: str = "data/training_data.csv"):
   
   os.makedirs(os.path.dirname(output_path), exist_ok = True)
@@ -203,7 +203,8 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
     waypoints=waypoints,
     params=LOSParams(
       Delta_min=LCFG.Delta_min, Delta_k=LCFG.Delta_k,
-      switch_radius=LCFG.switch_radius, u_desired=LCFG.u_desired,
+      switch_radius=LCFG.switch_radius, final_dock_radius=LCFG.final_dock_radius, 
+      u_desired=LCFG.u_desired,
       u_approach=LCFG.u_approach, approach_dist=LCFG.approach_dist,
     ))
     
@@ -242,6 +243,10 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
     t_ep = 0.0
     ep_start = time.time()
     ep_rows = 0
+    
+    LOG_EVERY = 3
+    best_dist_dock = float('inf')
+    steps_since_best = 0
 
     max_steps = int(max_ep_time / dt)
 
@@ -303,9 +308,16 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
         dy = DOCK_CFG.dock_y - yh
         dist_dock = math.hypot(dx, dy)
         e_psi = math.degrees(wrap_pi(psi_r - psih))
+        
+        if dist_dock < best_dist_dock - 1.0:
+          best_dist_dock = dist_dock
+          steps_since_best = 0
+        else:
+          steps_since_best += 1
 
         # Write row
-        writer.writerow([
+        if (step % LOG_EVERY == 0) or finished:
+          writer.writerow([
             ep, seed,
             f"{t_ep:.4f}", f"{xh:.4f}", f"{yh:.4f}", f"{psih:.4f}",
             f"{uh:.4f}", f"{vh:.4f}", f"{rh:.4f}",
@@ -320,6 +332,12 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
 
 
         sim.stepForward()
+        
+        stalled_too_long = steps_since_best > int(30.0 / dt)
+        still_far_away = dist_dock > 250.0
+
+        if (not finished) and t_ep > 120.0 and still_far_away and stalled_too_long:
+            break
 
         # Check if episode is done
         if finished:
@@ -353,9 +371,9 @@ def collect_data(n_episodes: int = 50, base_seed: int = 0,
 # Entry point 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Headless LOS docking data collection")
-    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--max-time", type=float, default=300.0,
+    parser.add_argument("--max-time", type=float, default=180.0,
                         help="Max seconds per episode before timeout")
     parser.add_argument("--output", default="data/training_data.csv")
     args = parser.parse_args()
