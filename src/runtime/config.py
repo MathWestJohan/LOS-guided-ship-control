@@ -31,14 +31,15 @@ class LOSConfig:
     """LOS guidance parameters."""
     Delta_min: float = 20.0            # minimum look-ahead distance [m]
     Delta_k: float = 2.0               # speed gain: Delta = Delta_min + Delta_k * |u|
-    switch_radius: float = 30.0        # waypoint acceptance radius [m]
-    u_desired: float = 12.0            # cruise speed [m/s]
-    u_approach: float = 0.3            # final-approach speed [m/s]
-    approach_dist: float = 150.0       # deceleration start distance [m]
+    switch_radius: float = 35.0        # waypoint acceptance radius [m]
+    final_dock_radius: float = 5.0     # radius for "final approach" behavior [m]
+    u_desired: float = 9.0             # cruise speed [m/s]
+    u_approach: float = 0.6            # final-approach speed [m/s]
+    approach_dist: float = 250.0       # deceleration start distance [m]
 
 @dataclass
 class SceneParams:
-    wave_height: float = 0.0
+    wave_height: float = 1.5
 
     # Heading reference filter
     ref_head_wn: float = 0.80
