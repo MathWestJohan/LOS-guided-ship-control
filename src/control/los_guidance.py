@@ -17,9 +17,10 @@ where:
 class LOSParams:
     Delta_min: float = 20.0       # Minimum look-ahead distance (m)
     Delta_k: float = 8.0          # speed gain: Delta = Delta_min + Delta_k * |u|
-    switch_radius: float = 8.0    # Waypoint acceptance radius (m)
+    switch_radius: float = 30.0    # Waypoint acceptance radius (m)
+    final_dock_radius: float = 5.0     # Radius for "final approach" behavior (m)
     u_desired: float = 12.0       # Cruise surge speed (m/s)
-    u_approach: float = 0.3       # Speed near final waypoint (m/s)
+    u_approach: float = 0.6       # Speed near final waypoint (m/s)
     approach_dist: float = 150.0  # Distance at which to start decelerating (m)
     
 
@@ -114,16 +115,17 @@ class LOSGuidance:
     rem = self._dist_to_next(x, y)
     last_leg = (self.leg >= len(self.wps) - 2)
     
-    if rem < self.p.switch_radius:
-      if last_leg:
-        self.finished = True
-        return dict(chi_los=self._phi(), u_d=0.0,
-                    e_ct=self._cross_track(x, y),
-                    e_at=rem, phi_p=self._phi(),
-                    leg=self.leg, finished=True,
-                    turn_angle=self._turn_angle_at_next())
-      else:
-        self.leg += 1
+    if last_leg:
+        if rem < self.p.final_dock_radius:
+           self.finished = True
+           return dict(chi_los=self._phi(), u_d=0.0,
+                       e_ct=self._cross_track(x, y),
+                       e_at=rem, phi_p=self._phi(),
+                       leg=self.leg, finished=True,
+                       turn_angle=self._turn_angle_at_next())
+    else:
+        if rem < self.p.switch_radius:
+            self.leg += 1
         
     phi_p = self._phi()
     e_ct = self._cross_track(x, y)
@@ -141,7 +143,7 @@ class LOSGuidance:
       
     # Cross track speed governor, limit speed when far off the path
     ct_limit = self.p.Delta_min
-    u_recover = max(self.p.u_approach, 0.25 * self.p.u_desired)
+    u_recover = max(self.p.u_approach, 0.10 * self.p.u_desired)
     if abs(e_ct) > ct_limit:
       u_d = min(u_d, u_recover)
     elif abs(e_ct) > ct_limit * 0.15:
