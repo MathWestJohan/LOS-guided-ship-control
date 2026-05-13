@@ -511,8 +511,8 @@ def main():
     print("SAVING")
     print("=" * 60)
 
-    torch.save(speed_model.state_dict(), os.path.join(CONFIG["output_dir"], "speed_net.pt"))
-    torch.save(steer_model.state_dict(), os.path.join(CONFIG["output_dir"], "steer_net.pt"))
+    torch.save(speed_model.state_dict(), os.path.join(CONFIG["output_dir"], "mlp_speed.pt"))
+    torch.save(steer_model.state_dict(), os.path.join(CONFIG["output_dir"], "mlp_steer.pt"))
 
     with open(os.path.join(CONFIG["output_dir"], "scaler_speed_x.pkl"), "wb") as f:
         pickle.dump(scaler_sx, f)
