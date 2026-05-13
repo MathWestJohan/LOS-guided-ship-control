@@ -44,8 +44,8 @@ class InitialArea:
   y_min: float = -20.0
   x_max: float = 100.0
   y_max: float = 100.0
-  psi_min: float = -2.1
-  psi_max: float = 2.1
+  psi_min: float = -math.pi
+  psi_max: float = math.pi
 
 @dataclass
 class RouteGeneratorConfig:
@@ -94,7 +94,7 @@ def _prune_short_legs(waypoints: List[Tuple[float, float]],
   pruned = [waypoints[0]]
   for wp in waypoints[1: -1]:
     dx = wp[0] - pruned[-1][0]
-    dy = wp[1] - pruned[-1][-1]
+    dy = wp[1] - pruned[-1][1]
     if math.hypot(dx, dy) >= min_distance:
       pruned.append(wp)
   pruned.append(waypoints[-1])
