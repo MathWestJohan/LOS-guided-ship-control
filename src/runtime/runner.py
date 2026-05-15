@@ -212,6 +212,9 @@ def build_scene_and_start():
     sd.setText(3, "τ [X,Y,N] (kN)")
 
     last_tau = (0.0, 0.0, 0.0)
+    if USE_MLP:
+        controller.reset()
+
     t_sim = 0.0
     n_legs = len(waypoints) - 1
     run_finished = False
@@ -285,6 +288,8 @@ def build_scene_and_start():
                 e_ct=e_ct,
                 e_psi=e_psi_deg,
                 dist_dock=dist_dock,
+                psi_r=psi_r,
+                r_r=r_r,
             )
         else:
             tau_x, tau_y, tau_psi = ctl.step(

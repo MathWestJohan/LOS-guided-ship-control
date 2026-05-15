@@ -65,15 +65,26 @@ class MLPController:
     )
     self.speed_model.eval()
     
-    self.steer_model = DockingMLP(8, list(steer_hidden), 2)
+    self.steer_model = DockingMLP(12, list(steer_hidden), 2)
     self.steer_model.load_state_dict(
       torch.load(os.path.join(model_dir, "mlp_steer.pt"),
                  map_location=self.device, weights_only=True)
     )
     self.steer_model.eval()
     
+    if getattr(self.scaler_sx, "n_features_in_", 6) != 6:
+      raise RuntimeError("Speed scaler does not match the expected 6-input model.")
+    if getattr(self.scaler_rx, "n_features_in_", 12) != 12:
+      raise RuntimeError("Steering scaler does not match the expected 12-input model.")
+  
+    self.reset()
+    
+  def reset(self):
+    self.prev_tau_y = 0.0
+    self.prev_tau_psi = 0.0
+    
   @torch.inference_mode()
-  def predict(self, x, y, psi, u, v, r, u_r, e_ct, e_psi, dist_dock):
+  def predict(self, x, y, psi, u, v, r, u_r, e_ct, e_psi, dist_dock, psi_r, r_r):
     """
     Compute control forces from current ship state.
     """
@@ -86,14 +97,17 @@ class MLPController:
     tau_x = self.scaler_sy.inverse_transform(tau_x_scaled)[0, 0]
     
     # steering network
-    x_steer = np.array([[np.sin(psi), np.cos(psi), e_ct, e_psi, v, r, x, y]])
+    x_steer = np.array([[np.sin(psi), np.cos(psi), e_ct, e_psi, v, r, x, y, psi_r, r_r, self.prev_tau_y, self.prev_tau_psi]])
     x_steer_scaled = self.scaler_rx.transform(x_steer)
     x_steer_tensor = torch.tensor(x_steer_scaled, dtype=torch.float32, device=self.device)
     tau_yn_scaled = self.steer_model(x_steer_tensor).cpu().numpy()
     tau_yn = self.scaler_ry.inverse_transform(tau_yn_scaled)[0]
-    tau_y, tau_n = tau_yn[0], tau_yn[1]
+    tau_y, tau_psi = tau_yn[0], tau_yn[1]
     
-    return float(tau_x), float(tau_y), float(tau_n)
+    self.prev_tau_y = tau_y
+    self.prev_tau_psi = tau_psi
+    
+    return float(tau_x), tau_y, tau_psi
   
 # Example usage
 if __name__ == "__main__":
@@ -102,7 +116,7 @@ if __name__ == "__main__":
         x=100, y=300, psi=np.deg2rad(280),
         u=0.5, v=0.01, r=0.001,
         u_r=0.8, e_ct=2.5, e_psi=np.deg2rad(5),
-        dist_dock=350
+        dist_dock=350, psi_r=np.deg2rad(280), r_r=0.001
     )
     print(f"τ_x = {tx:.1f} N,  τ_y = {ty:.1f} N,  τ_ψ = {tn:.1f} Nm")
     

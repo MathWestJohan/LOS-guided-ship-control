@@ -26,7 +26,7 @@ import pickle
 
 CONFIG = {
     # Data
-    "data_dir": "data/training_data.csv",        # folder with CSV episode files
+    "data_dir": "data/training_data",        # folder with CSV episode files
     "output_dir": "models",
 
     "speed_hidden": [64, 32],
@@ -48,41 +48,103 @@ CONFIG = {
     "seed": 42,
 }
 
+def _estimate_r_r_from_psi_r(df: pd.DataFrame) -> pd.Series:
+    rr = pd.Series(index=df.index, dtype=float)
+
+    if "episode" in df.columns:
+        groups = df.groupby("episode", sort=False)
+    else:
+        groups = [(None, df)]
+
+    for _, g in groups:
+        psi_r = np.unwrap(g["psi_r"].to_numpy(dtype=float))
+        t = g["t"].to_numpy(dtype=float)
+
+        rr_vals = np.zeros(len(g), dtype=float)
+        if len(g) > 1:
+            dt = np.diff(t)
+            dpsi = np.diff(psi_r)
+
+            rr_step = np.zeros(len(g) - 1, dtype=float)
+            valid = np.abs(dt) > 1e-9
+            rr_step[valid] = dpsi[valid] / dt[valid]
+
+            rr_vals[1:] = rr_step
+            rr_vals[0] = 0.0
+
+        rr.loc[g.index] = rr_vals
+
+    return rr
+
+
+def _previous_by_episode(df: pd.DataFrame, col: str) -> pd.Series:
+    if "episode" in df.columns:
+        return df.groupby("episode", sort=False)[col].shift(1).fillna(0.0)
+    return df[col].shift(1).fillna(0.0)
+
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute MLP input features from raw logged columns.
-
-    Expected raw columns from your data collector:
-        t, x, y, psi, u, v, r, u_r, e_ct, e_psi,
-        tau_x, tau_y, tau_n, dist_dock, ...
-
-    If your CSV column names differ, adjust the mapping below.
+    Uses already logged dock-relative dx, dy.
+    Estimates r_r from psi_r and t.
+    Adds previous steering control from shifted tau_y and tau_psi.
     """
-    feat = pd.DataFrame()
+    required_cols = [
+        "t",
+        "psi",
+        "u",
+        "v",
+        "r",
+        "u_r",
+        "psi_r",
+        "e_ct",
+        "e_psi",
+        "dx",
+        "dy",
+        "dist_dock",
+        "tau_x",
+        "tau_y",
+        "tau_psi",
+    ]
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(
+            "Missing required columns for feature engineering: "
+            + ", ".join(missing)
+        )
 
-    # Shared features
-    feat["dx"]       = df["x"]          # position relative to dock (already in dock frame)
-    feat["dy"]       = df["y"]
-    feat["u"]        = df["u"]          # surge velocity
-    feat["u_r"]      = df["u_r"]        # reference surge speed from guidance
-    feat["e_ct"]     = df["e_ct"]       # cross-track error
-    feat["v"]        = df["v"]          # sway velocity
-    feat["r"]        = df["r"]          # yaw rate
-    feat["e_psi"]    = df["e_psi"]      # heading error
-    feat["sin_psi"]  = np.sin(df["psi"])
-    feat["cos_psi"]  = np.cos(df["psi"])
-    feat["dist_dock"] = df["dist_dock"] # distance to dock
+    feat = pd.DataFrame(index=df.index)
+
+    # Shared state / guidance features
+    feat["dx"] = df["dx"]
+    feat["dy"] = df["dy"]
+    feat["u"] = df["u"]
+    feat["u_r"] = df["u_r"]
+    feat["e_ct"] = df["e_ct"]
+    feat["v"] = df["v"]
+    feat["r"] = df["r"]
+    feat["e_psi"] = df["e_psi"]
+    feat["sin_psi"] = np.sin(df["psi"])
+    feat["cos_psi"] = np.cos(df["psi"])
+    feat["dist_dock"] = df["dist_dock"]
+
+    # New steering-context features from existing CSVs
+    feat["psi_r"] = df["psi_r"]
+    feat["r_r"] = _estimate_r_r_from_psi_r(df)
+    feat["prev_tau_y"] = _previous_by_episode(df, "tau_y")
+    feat["prev_tau_psi"] = _previous_by_episode(df, "tau_psi")
 
     # Targets
-    feat["tau_x"]    = df["tau_x"]      # surge force (speed net target)
-    feat["tau_y"]    = df["tau_y"]      # sway force (steer net target)
-    feat["tau_n"]    = df["tau_psi"]      # yaw moment (steer net target)
+    feat["tau_x"] = df["tau_x"]
+    feat["tau_y"] = df["tau_y"]
+    feat["tau_n"] = df["tau_psi"]
 
-    return feat.dropna()
+    feat = feat.replace([np.inf, -np.inf], np.nan).dropna()
+    return feat.reset_index(drop=True)
 
 # Input column names for each network
 SPEED_INPUTS  = ["dx", "dy", "u", "u_r", "e_ct", "dist_dock"]
-STEER_INPUTS  = ["sin_psi", "cos_psi", "e_ct", "e_psi", "v", "r", "dx", "dy"]
+STEER_INPUTS  = ["sin_psi", "cos_psi", "e_ct", "e_psi", "v", "r", "dx", "dy", "psi_r", "r_r", "prev_tau_y", "prev_tau_psi"]
 SPEED_TARGETS = ["tau_x"]
 STEER_TARGETS = ["tau_y", "tau_n"]
 
@@ -486,7 +548,7 @@ def main():
 
     # Steering network
     print("\n" + "=" * 60)
-    print("STEERING NETWORK  [sin(ψ), cos(ψ), e_ct, e_ψ, v, r, dx, dy] → τ_y, τ_ψ")
+    print("STEERING NETWORK  [sin(ψ), cos(ψ), e_ct, e_ψ, v, r, dx, dy, ψ_r, r_r, τ_y(k-1), τ_ψ(k-1)] → τ_y, τ_ψ")
     print("=" * 60)
     train_r, val_r, test_r, scaler_rx, scaler_ry = prepare_data(
         train_features, val_features, test_features, STEER_INPUTS, STEER_TARGETS, CONFIG
